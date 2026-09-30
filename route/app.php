@@ -1,0 +1,199 @@
+<?php
+// +----------------------------------------------------------------------
+// | ThinkPHP [ WE CAN DO IT JUST THINK ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2006~2018 http://thinkphp.cn All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed ( http://www.apache.org/licenses/LICENSE-2.0 )
+// +----------------------------------------------------------------------
+// | Author: liu21st <liu21st@gmail.com>
+// +----------------------------------------------------------------------
+use app\middleware\AuthApi;
+use app\middleware\CheckLogin;
+use app\middleware\ViewOutput;
+use think\facade\Route;
+use think\middleware\SessionInit;
+
+Route::pattern([
+    'id'   => '\d+',
+]);
+
+Route::any('/install', 'install/index')
+->middleware(ViewOutput::class);
+
+Route::any('/login', 'auth/login')->middleware(SessionInit::class)
+->middleware(ViewOutput::class);
+Route::get('/verifycode', 'auth/verifycode')->middleware(SessionInit::class);
+Route::post('/auth/totp', 'auth/totp')->middleware(SessionInit::class);
+Route::get('/logout', 'auth/logout');
+Route::any('/quicklogin', 'auth/quicklogin');
+Route::any('/dmtask/status', 'dmonitor/status');
+Route::any('/optimizeip/status', 'optimizeip/status');
+Route::get('/cron', 'system/cron');
+
+Route::group(function () {
+    Route::any('/', 'index/index');
+    Route::post('/changeskin', 'index/changeskin');
+    Route::get('/cleancache', 'index/cleancache');
+    Route::any('/setpwd', 'index/setpwd');
+    Route::any('/totp/:action', 'index/totp');
+    Route::get('/test', 'index/test');
+
+    Route::post('/user/data', 'user/user_data');
+    Route::post('/user/op', 'user/user_op');
+    Route::get('/user', 'user/user');
+    
+    Route::post('/log/data', 'user/log_data');
+    Route::post('/log/op', 'user/log_op');
+    Route::get('/log', 'user/log');
+
+    Route::post('/account/data', 'domain/account_data');
+    Route::post('/account/:action', 'domain/account_op');
+    Route::get('/account/:action', 'domain/account_add');
+    Route::get('/account', 'domain/account');
+
+    Route::get('/cloudflare/hostnames/:id', 'cloudflare/hostnames');
+    Route::post('/cloudflare/hostnames/data/:id', 'cloudflare/hostnames_data');
+    Route::post('/cloudflare/hostnames/add/:id', 'cloudflare/hostnames_add');
+    Route::post('/cloudflare/hostnames/update/:id', 'cloudflare/hostnames_update');
+    Route::post('/cloudflare/hostnames/delete/:id', 'cloudflare/hostnames_delete');
+    Route::post('/cloudflare/hostnames/refresh/:id', 'cloudflare/hostnames_refresh');
+    Route::post('/cloudflare/hostnames/txttargets/:id', 'cloudflare/hostnames_txt_targets');
+    Route::post('/cloudflare/hostnames/batch_add/:id', 'cloudflare/hostnames_batch_add');
+    Route::post('/cloudflare/hostnames/batch_delete/:id', 'cloudflare/hostnames_batch_delete');
+    Route::post('/cloudflare/hostnames/batch_update/:id', 'cloudflare/hostnames_batch_update');
+    Route::post('/cloudflare/fallback/get/:id', 'cloudflare/fallback_get');
+    Route::post('/cloudflare/fallback/set/:id', 'cloudflare/fallback_set');
+    Route::post('/cloudflare/fallback/delete/:id', 'cloudflare/fallback_delete');
+    Route::post('/cloudflare/dcv_delegation_uuid/:id', 'cloudflare/dcv_delegation_uuid');
+    Route::post('/cloudflare/get_domain_default_line', 'cloudflare/get_domain_default_line');
+    Route::get('/cloudflare/tunnels/:id', 'cloudflare/tunnels');
+    Route::post('/cloudflare/tunnels/data/:id', 'cloudflare/tunnels_data');
+    Route::post('/cloudflare/tunnels/add/:id', 'cloudflare/tunnels_add');
+    Route::post('/cloudflare/tunnels/delete/:id', 'cloudflare/tunnels_delete');
+    Route::post('/cloudflare/tunnels/token/:id', 'cloudflare/tunnels_token');
+    Route::post('/cloudflare/tunnels/publichostnames/data/:id', 'cloudflare/tunnels_public_hostnames_data');
+    Route::post('/cloudflare/tunnels/publichostnames/save/:id', 'cloudflare/tunnels_public_hostnames_save');
+    Route::post('/cloudflare/tunnels/publichostnames/delete/:id', 'cloudflare/tunnels_public_hostnames_delete');
+    Route::post('/cloudflare/tunnels/cidr/data/:id', 'cloudflare/tunnels_cidr_data');
+    Route::post('/cloudflare/tunnels/cidr/add/:id', 'cloudflare/tunnels_cidr_add');
+    Route::post('/cloudflare/tunnels/cidr/delete/:id', 'cloudflare/tunnels_cidr_delete');
+    Route::post('/cloudflare/tunnels/hostnameroutes/data/:id', 'cloudflare/tunnels_hostname_routes_data');
+    Route::post('/cloudflare/tunnels/hostnameroutes/add/:id', 'cloudflare/tunnels_hostname_routes_add');
+    Route::post('/cloudflare/tunnels/hostnameroutes/delete/:id', 'cloudflare/tunnels_hostname_routes_delete');
+
+    Route::any('/domain/expirenotice', 'domain/expire_notice');
+    Route::post('/domain/updatedate', 'domain/update_date');
+    Route::post('/domain/data', 'domain/domain_data');
+    Route::post('/domain/op', 'domain/domain_op');
+    Route::post('/domain/list', 'domain/domain_list');
+    Route::any('/domain/dnscheck', 'domain/dnscheck');
+    Route::post('/domain/category/data', 'domain/category_data');
+    Route::post('/domain/category/:action', 'domain/category_op');
+    Route::get('/domain/category/list', 'domain/category_list');
+    Route::post('/domain/setcategory', 'domain/domain_set_category');
+    Route::get('/domain/add', 'domain/domain_add');
+    Route::get('/domain/category', 'domain/category');
+    Route::get('/domain', 'domain/domain');
+
+    Route::post('/record/data/:id', 'domain/record_data');
+    Route::post('/record/add/:id', 'domain/record_add');
+    Route::post('/record/update/:id', 'domain/record_update');
+    Route::post('/record/delete/:id', 'domain/record_delete');
+    Route::post('/record/status/:id', 'domain/record_status');
+    Route::post('/record/remark/:id', 'domain/record_remark');
+    Route::post('/record/check/:id', 'domain/record_check');
+    Route::post('/record/batch/:id', 'domain/record_batch');
+    Route::post('/record/batchedit/:id', 'domain/record_batch_edit');
+    Route::any('/record/batchadd/:id', 'domain/record_batch_add');
+    Route::get('/record/batchadd', 'domain/record_batch_add2');
+    Route::any('/record/batchedit', 'domain/record_batch_edit2');
+    Route::any('/record/log/:id', 'domain/record_log');
+    Route::post('/record/groups/:id', 'domain/record_groups');
+    Route::post('/record/list', 'domain/record_list');
+    Route::post('/record/weight/data/:id', 'domain/weight_data');
+    Route::any('/record/weight/:id', 'domain/weight');
+    Route::any('/record/alias/:id', 'domain/alias');
+    Route::get('/record/import/:id', 'domain/record_import');
+    Route::get('/record/search', 'domain/record_search');
+    Route::get('/record/:id', 'domain/record');
+    Route::get('/record/smartparse', 'domain/smartparse');
+    Route::post('/record/quickinfo/:id', 'domain/quickinfo');
+
+    Route::get('/dmonitor/overview', 'dmonitor/overview');
+    Route::post('/dmonitor/task/data', 'dmonitor/task_data');
+    Route::post('/dmonitor/task/log/data/:id', 'dmonitor/tasklog_data');
+    Route::get('/dmonitor/task/info/:id', 'dmonitor/taskinfo');
+    Route::post('/dmonitor/task/:action', 'dmonitor/task_op');
+    Route::get('/dmonitor/task/:action', 'dmonitor/taskform');
+    Route::get('/dmonitor/task', 'dmonitor/task');
+    Route::post('/dmonitor/clean', 'dmonitor/clean');
+
+    Route::any('/optimizeip/opipset', 'optimizeip/opipset');
+    Route::post('/optimizeip/queryapi', 'optimizeip/queryapi');
+    Route::post('/optimizeip/opiplist/data', 'optimizeip/opiplist_data');
+    Route::get('/optimizeip/opiplist', 'optimizeip/opiplist');
+    Route::any('/optimizeip/opipform/:action', 'optimizeip/opipform');
+
+    Route::get('/cert/certaccount', 'cert/certaccount');
+    Route::get('/cert/deployaccount', 'cert/deployaccount');
+    Route::post('/cert/account/data', 'cert/account_data');
+    Route::post('/cert/account/:action', 'cert/account_op');
+    Route::get('/cert/account/:action', 'cert/account_form');
+
+    Route::get('/cert/certorder', 'cert/certorder');
+    Route::post('/cert/order/data', 'cert/order_data');
+    Route::post('/cert/order/process', 'cert/order_process');
+    Route::post('/cert/order/:action', 'cert/order_op');
+    Route::get('/cert/order/:action', 'cert/order_form');
+
+    Route::get('/cert/deploytask', 'cert/deploytask');
+    Route::post('/cert/deploy/data', 'cert/deploy_data');
+    Route::post('/cert/deploy/process', 'cert/deploy_process');
+    Route::post('/cert/deploy/:action', 'cert/deploy_op');
+    Route::get('/cert/deploy/:action', 'cert/deploy_form');
+
+    Route::get('/cert/cname', 'cert/cname');
+    Route::post('/cert/cname/data', 'cert/cname_data');
+    Route::post('/cert/cname/:action', 'cert/cname_op');
+    
+    Route::get('/cert/certset', 'cert/certset');
+
+    Route::post('/schedule/stask/data', 'schedule/stask_data');
+    Route::post('/schedule/stask/:action', 'schedule/stask_op');
+    Route::get('/schedule/stask/:action', 'schedule/staskform');
+    Route::get('/schedule/stask', 'schedule/stask');
+
+    Route::get('/system/loginset', 'system/loginset');
+    Route::get('/system/noticeset', 'system/noticeset');
+    Route::get('/system/proxyset', 'system/proxyset');
+    Route::post('/system/set', 'system/set');
+    Route::get('/system/mailtest', 'system/mailtest');
+    Route::get('/system/tgbottest', 'system/tgbottest');
+    Route::get('/system/webhooktest', 'system/webhooktest');
+    Route::get('/system/customwebhooktest', 'system/customwebhooktest');
+    Route::post('/system/proxytest', 'system/proxytest');
+    Route::get('/system/cronset', 'system/cronset');
+
+})->middleware(CheckLogin::class)
+->middleware(ViewOutput::class);
+
+Route::group('api', function () {
+    Route::post('/domain/:id', 'domain/domain_info');
+    Route::post('/domain', 'domain/domain_data');
+    
+    Route::post('/record/data/:id', 'domain/record_data');
+    Route::post('/record/add/:id', 'domain/record_add');
+    Route::post('/record/update/:id', 'domain/record_update');
+    Route::post('/record/delete/:id', 'domain/record_delete');
+    Route::post('/record/status/:id', 'domain/record_status');
+    Route::post('/record/remark/:id', 'domain/record_remark');
+    Route::post('/record/batch/:id', 'domain/record_batch');
+
+    Route::post('/cert/order', 'cert/order_info');
+
+})->middleware(AuthApi::class);
+
+Route::miss(function() {
+    return response('404 Not Found')->code(404);
+});

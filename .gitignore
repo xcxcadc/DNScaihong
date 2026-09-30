@@ -1,0 +1,11 @@
+/.idea
+/.vscode
+/vendor
+*.log
+*.tar.gz
+*.zip
+.env
+.ace-tool/
+/.codex-tmp/dns-panel-ref/
+/runtime
+!/runtime/.gitignore
