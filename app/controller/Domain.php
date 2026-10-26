@@ -527,6 +527,38 @@ class Domain extends BaseController
         return json(['total' => $domainRecords['total'], 'rows' => $domainRecords['list']]);
     }
 
+    // 只读快照供导入预检和手动查重使用。与列表接口不同，服务商出错时明确返回错误，避免误判为空域名。
+    public function record_snapshot()
+    {
+        $id = input('param.id/d');
+        $drow = Db::name('domain')->where('id', $id)->find();
+        if (!$drow) return json(['code' => -1, 'msg' => '域名不存在']);
+        if (!checkPermission(0, $drow['name'])) return json(['code' => -1, 'msg' => '无权限']);
+
+        $page = max(1, input('post.page/d', 1));
+        if ($page > 1000) return json(['code' => -1, 'msg' => '查询页数超出上限']);
+        $size = 100;
+        $dns = DnsHelper::getModel($drow['aid'], $drow['name'], $drow['thirdid']);
+        if (!$dns) return json(['code' => -1, 'msg' => 'DNS 模块不存在']);
+        $result = $dns->getDomainRecords($page, $size);
+        if ($result === false || !is_array($result) || !isset($result['list'], $result['total'])) {
+            return json(['code' => -1, 'msg' => '获取解析记录失败，' . $dns->getError()]);
+        }
+        if (!is_array($result['list']) || !is_numeric($result['total'])) {
+            return json(['code' => -1, 'msg' => '服务商返回的记录格式不正确']);
+        }
+        $dnstype = Db::name('account')->where('id', $drow['aid'])->value('type');
+        if (!isset(DnsHelper::$dns_config[$dnstype])) {
+            return json(['code' => -1, 'msg' => 'DNS 类型不受支持']);
+        }
+        // 部分服务商接口一次返回全部记录，不实现分页；在本站按固定页长切片。
+        if (DnsHelper::$dns_config[$dnstype]['page'] && count($result['list']) === (int)$result['total']) {
+            $result['list'] = array_slice($result['list'], ($page - 1) * $size, $size);
+        }
+        return json(['code' => 0, 'page' => $page, 'pageSize' => $size,
+            'total' => (int)$result['total'], 'rows' => $result['list']]);
+    }
+
     public function record_list()
     {
         $id = input('post.id/d');

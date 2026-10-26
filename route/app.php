@@ -97,6 +97,7 @@ Route::group(function () {
     Route::get('/domain', 'domain/domain');
 
     Route::post('/record/data/:id', 'domain/record_data');
+    Route::post('/record/snapshot/:id', 'domain/record_snapshot');
     Route::post('/record/add/:id', 'domain/record_add');
     Route::post('/record/update/:id', 'domain/record_update');
     Route::post('/record/delete/:id', 'domain/record_delete');

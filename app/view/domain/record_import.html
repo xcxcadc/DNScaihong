@@ -30,6 +30,7 @@
 			<p class="help-block">Cloudflare 的代理只适用于支持代理的记录类型。导入前请核对目标线路、TTL 和记录值；确认添加会向当前域名逐条新增记录。</p>
 		</div>
 		<div id="import-format" class="alert alert-info" style="display:none;"></div>
+		<div id="import-summary" class="alert alert-info" role="status" style="display:none;"></div>
 		<div id="import-toolbar" style="display:none;margin-bottom:12px;">
 			<button type="button" id="confirm-import" class="btn btn-primary" onclick="startImport()"><i class="fa fa-check"></i> 确认添加</button>
 			<span id="record-count" style="margin-left:10px;"></span>
@@ -60,6 +61,7 @@
 <script src="/static/js/layer/layer.js"></script>
 <script src="/static/js/xlsx.full.min.js"></script>
 <script src="/static/js/record-import.js"></script>
+<script src="/static/js/record-dedupe.js"></script>
 <script>
 var recordLine = {$recordLine|json_encode|raw};
 var dnsconfig = {$dnsconfig|json_encode|raw};
@@ -68,6 +70,8 @@ var domainName = {$domainName|json_encode|raw};
 var minTTL = parseInt('{$minTTL}', 10) || 1;
 var importRecords = [];
 var importing = false;
+var snapshotReady = false;
+var importGeneration = 0;
 var lineMatcher = createLineMatcher(recordLine, defaultLineId);
 
 $(document).ready(function(){
@@ -272,12 +276,15 @@ function parseImportRows(parsed){
 	$('#import-format').text('识别格式：' + parsed.format + '；来源：' + RecordImportParser.providerName(parsed.provider)
 		+ '；无效或已暂停的记录会跳过。').show();
 	renderPreview();
+	preflightImport();
 }
 
 function resetPreview(){
+	importGeneration++;
+	snapshotReady = false;
 	importRecords = [];
 	$('#preview-body').empty();
-	$('#preview-container,#import-toolbar,#import-format').hide();
+	$('#preview-container,#import-toolbar,#import-format,#import-summary').hide();
 }
 
 function renderPreview(){
@@ -299,27 +306,99 @@ function renderPreview(){
 		$row.append($('<td>').text(record.ttl));
 		$row.append($('<td>').text(record.weight));
 		$row.append($('<td>').attr('id', 'import-result-' + i)
-			.addClass(record.valid ? 'text-muted' : 'text-danger').text(record.result));
+			.addClass(record.outcome === 'failed' || !record.valid ? 'text-danger' : record.skip ? 'text-warning' : 'text-muted').text(record.result));
 		$body.append($row);
 	}
-	var valid = importRecords.filter(function(record){ return record.valid; }).length;
-	$('#record-count').text('共 ' + importRecords.length + ' 条，' + valid + ' 条可添加，' + (importRecords.length - valid) + ' 条跳过');
+	var valid = importRecords.filter(function(record){ return record.valid && !record.skip; }).length;
+	var duplicates = importRecords.filter(function(record){ return record.skip === 'existing'; }).length;
+	var inFile = importRecords.filter(function(record){ return record.skip === 'file'; }).length;
+	$('#record-count').text('共 ' + importRecords.length + ' 条，' + valid + ' 条可添加，' + duplicates + ' 条已存在、' + inFile + ' 条文件内重复，' + (importRecords.length - valid - duplicates - inFile) + ' 条无效或暂停');
 	$('#preview-container,#import-toolbar').show();
-	$('#confirm-import').prop('disabled', valid === 0);
+	$('#confirm-import').prop('disabled', !snapshotReady || valid === 0 || importing);
+}
+
+function duplicateStatuses(rows){
+	var existing = new Set(rows.map(RecordDedupe.exactKey));
+	var inFile = new Set();
+	importRecords.forEach(function(record){
+		record.skip = '';
+		if(record.outcome === 'success' || record.outcome === 'failed') return;
+		if(!record.valid) return;
+		var key = RecordDedupe.exactKey(record);
+		if(existing.has(key)){
+			record.skip = 'existing';
+			record.result = '跳过：目标域名已有完全相同的记录';
+		}else if(inFile.has(key)){
+			record.skip = 'file';
+			record.result = '跳过：文件内重复，保留首条';
+		}else{
+			inFile.add(key);
+			record.result = '待添加';
+		}
+	});
+}
+
+function renderImportSummary(message){
+	var $summary = $('#import-summary').empty().show();
+	$summary.append($('<strong>').text(message));
+	var details = importRecords.map(function(record, i){ return {record:record, number:i+1}; })
+		.filter(function(item){ return item.record.outcome === 'failed' || item.record.skip || !item.record.valid; });
+	if(!details.length) return;
+	var $list = $('<ol>').css({'max-height':'320px','overflow':'auto','margin-top':'10px','padding-left':'22px'});
+	details.forEach(function(item){
+		var record = item.record;
+		$list.append($('<li>').text('第 ' + item.number + ' 条：' + record.name + ' [' + record.type + '] ' + record.value + ' — ' + record.result));
+	});
+	$summary.append($list);
+}
+
+async function preflightImport(){
+	var generation = importGeneration;
+	snapshotReady = false;
+	$('#confirm-import').prop('disabled', true);
+	renderImportSummary('正在读取目标域名的全部记录并检查重复…');
+	try{
+		var rows = await RecordDedupe.fetchAll({$domainId});
+		if(generation !== importGeneration) return;
+		duplicateStatuses(rows);
+		snapshotReady = true;
+		renderPreview();
+		renderImportSummary('预检完成：相同主机名、类型、线路和值（MX 还比较优先级）的记录会跳过；仅记录值相同不会跳过。');
+	}catch(e){
+		if(generation !== importGeneration) return;
+		renderImportSummary('无法读取完整目标记录：' + e.message + '。已停止导入，请重试。');
+		layer.alert('导入预检失败：' + e.message, {icon:2});
+	}
 }
 
 async function startImport(){
-	if(importing || !importRecords.length) return;
+	if(importing || !snapshotReady || !importRecords.length) return;
 	importing = true;
+	snapshotReady = false;
 	$('#confirm-import,#import-file,#source-provider').prop('disabled', true);
 	var success = 0;
 	var fail = 0;
 	var skipped = 0;
+	var existingCount = 0;
+	var inFileCount = 0;
+	try{
+		duplicateStatuses(await RecordDedupe.fetchAll({$domainId}));
+		renderPreview();
+		existingCount = importRecords.filter(function(record){ return record.skip === 'existing'; }).length;
+		inFileCount = importRecords.filter(function(record){ return record.skip === 'file'; }).length;
+	}catch(e){
+		importing = false;
+		snapshotReady = false;
+		$('#import-file,#source-provider').prop('disabled', false);
+		renderImportSummary('导入已停止：重新检查目标记录失败：' + e.message);
+		layer.alert('导入已停止：' + e.message, {icon:2});
+		return;
+	}
 
 	for(var i = 0; i < importRecords.length; i++){
 		var record = importRecords[i];
 		var $result = $('#import-result-' + i);
-		if(!record.valid){ skipped++; continue; }
+		if(!record.valid || record.skip){ skipped++; continue; }
 		$result.removeClass('text-muted text-danger text-success').addClass('text-info').text('正在添加...');
 		try{
 			var response = await $.ajax({
@@ -339,16 +418,19 @@ async function startImport(){
 			});
 			if(response.code === 0){
 				success++;
+				record.outcome = 'success';
 				record.result = '添加成功';
 				$result.removeClass('text-info').addClass('text-success').text(record.result);
 			}else{
 				fail++;
+				record.outcome = 'failed';
 				record.result = response.msg || '添加失败';
 				$result.removeClass('text-info').addClass('text-danger').text(record.result);
 			}
 		}catch(e){
 			fail++;
-			record.result = '请求失败';
+			record.outcome = 'failed';
+			record.result = e.responseJSON && e.responseJSON.msg ? e.responseJSON.msg : (e.statusText ? '请求失败：' + e.statusText : '请求失败');
 			$result.removeClass('text-info').addClass('text-danger').text(record.result);
 		}
 	}
@@ -356,9 +438,12 @@ async function startImport(){
 	importing = false;
 	$('#import-file,#source-provider').prop('disabled', false);
 	$('#confirm-import').prop('disabled', true);
-	layer.alert('全部添加完成，成功 ' + success + ' 个，失败 ' + fail + ' 个，跳过 ' + skipped + ' 个。可在表格中查看每条结果。', {
+	var message = '导入完成：成功 ' + success + ' 条，失败 ' + fail + ' 条，跳过 ' + skipped + ' 条（目标已有 ' + existingCount + ' 条，文件内重复 ' + inFileCount + ' 条）。';
+	renderImportSummary(message + ' 以下逐条列出失败及跳过原因。');
+	layer.alert(message + ' 点击确定查看失败及跳过明细。', {
 		title: '导入结果',
-		icon: fail === 0 ? 1 : 0
+		icon: fail === 0 ? 1 : 0,
+		yes: function(index){ layer.close(index); document.getElementById('import-summary').scrollIntoView({behavior:'smooth',block:'start'}); }
 	});
 }
 </script>

@@ -3,6 +3,7 @@
 {block name="main"}
 <style>
 td{overflow: hidden;text-overflow: ellipsis;white-space: nowrap;max-width:360px;}
+#dedupe-panel td{white-space:normal;max-width:none;overflow-wrap:anywhere;}
 </style>
 <div class="modal" id="modal-store" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true" data-backdrop="static">
 	<div class="modal-dialog">
@@ -183,6 +184,7 @@ td{overflow: hidden;text-overflow: ellipsis;white-space: nowrap;max-width:360px;
   <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> 搜索</button>
   <a href="javascript:searchClear()" class="btn btn-default" title="刷新解析记录列表"><i class="fa fa-refresh"></i> 刷新</a>
   <a href="javascript:addframe()" class="btn btn-success"><i class="fa fa-plus"></i> 添加记录</a>
+  <button type="button" class="btn btn-info" id="dedupe-run" onclick="scanRecordDuplicates()"><i class="fa fa-files-o"></i> 查重</button>
   {if $dnsconfig.type=='cloudflare' && $user['level'] eq 2}<a href="/cloudflare/hostnames/{$domainId}" class="btn btn-default">Cloudflare自定义主机名</a>{/if}
   {if $dnsconfig.type=='aliyun'}<a href="/record/weight/{$domainId}" class="btn btn-default">权重配置</a>{/if}
   {if $dnsconfig.type=='dnspod'}<a href="/record/alias/{$domainId}" class="btn btn-default">域名别名</a>{/if}
@@ -233,6 +235,16 @@ td{overflow: hidden;text-overflow: ellipsis;white-space: nowrap;max-width:360px;
   <a href="javascript:advanceSearch()" class="btn"><i class="fa fa-angle-up"></i> 收起</a>
 </div>
 </form>
+	  <div id="dedupe-panel" class="panel panel-info" style="display:none;margin-top:14px;">
+		<div class="panel-heading"><strong>解析记录查重与对比</strong><button type="button" class="close" aria-label="关闭查重结果" onclick="$('#dedupe-panel').hide()">&times;</button></div>
+		<div class="panel-body">
+			<p>完全重复：当前域名内主机记录、记录类型、线路和记录值相同；MX 还比较优先级。TTL、状态、备注和权重差异会列出，但不改变重复判定。仅记录值相同的关联记录只供对比，不建议按此条件删除。</p>
+			<div id="dedupe-message" role="status"></div>
+			<div id="dedupe-exact"></div>
+			<div id="dedupe-related"></div>
+			<button type="button" class="btn btn-danger" id="dedupe-delete" onclick="deleteSelectedDuplicates()" style="display:none;">删除选中的完全重复记录</button>
+		</div>
+	  </div>
 
 	  <table id="listTable">
 	  </table>
@@ -248,12 +260,128 @@ td{overflow: hidden;text-overflow: ellipsis;white-space: nowrap;max-width:360px;
 <script src="/static/js/bootstrapValidator.min.js"></script>
 <script src="/static/js/xlsx.full.min.js"></script>
 <script src="/static/js/custom.js?v=1006"></script>
+<script src="/static/js/record-dedupe.js"></script>
 <script>
 var recordLine = {$recordLine|json_encode|raw};
 var dnsconfig = {$dnsconfig|json_encode|raw};
 var defaultLine = recordLine[0].id;
 var sidePagination = dnsconfig.page ? 'client' : 'server';
 var showWeight = dnsconfig.weight;
+var dedupeRows = new Map();
+var dedupeBusy = false;
+function displayRecordField(row, key){
+	if(key === 'Line'){
+		var line = recordLine.find(function(item){ return String(item.id) === String(row.Line); });
+		return line ? line.name + ' (' + row.Line + ')' : String(row.Line === undefined ? '' : row.Line);
+	}
+	var value = row[key];
+	return Array.isArray(value) ? value.join(', ') : value === null || value === undefined ? '' : String(value);
+}
+function comparisonDetails(row, base){
+	var labels = {Name:'主机',Type:'类型',Line:'线路',Value:'记录值',MX:'MX',TTL:'TTL',Status:'状态',Remark:'备注',Weight:'权重'};
+	return Object.keys(labels).filter(function(key){
+		return displayRecordField(row,key) !== displayRecordField(base,key);
+	}).map(function(key){ return labels[key] + ': ' + displayRecordField(base,key) + ' → ' + displayRecordField(row,key); }).join('；') || '各字段一致';
+}
+function renderDedupeGroup(group, deletable){
+	var $section = $('<div>').addClass('panel panel-default');
+	var $header = $('<div>').addClass('panel-heading').text(deletable ? '完全重复：' + group.length + ' 条，保留首条作为对比基准' : '同值关联：' + group.length + ' 条，仅供对比');
+	$section.append($header);
+	var $wrap = $('<div>').addClass('table-responsive').css({'max-height':'480px','overflow':'auto'});
+	var $table = $('<table>').addClass('table table-striped table-bordered table-condensed');
+	var $head = $('<tr>');
+	['选择','记录 ID','主机','类型','线路','记录值','MX','TTL','状态','备注','权重','与首条比较'].forEach(function(label){ $head.append($('<th>').text(label)); });
+	$table.append($('<thead>').append($head));
+	var $body = $('<tbody>');
+	group.forEach(function(row,index){
+		var id = RecordDedupe.id(row);
+		var $tr = $('<tr>');
+		var $select = $('<td>');
+		if(deletable && index > 0 && !(row.Name === '@' && (row.Type === 'NS' || row.Type === 'SOA'))){
+			$select.append($('<input>').attr({type:'checkbox','aria-label':'选择删除记录 ' + id}).addClass('dedupe-select').val(id));
+		}
+		$tr.append($select);
+		$tr.append($('<td>').text(id));
+		['Name','Type','Line','Value','MX','TTL','Status','Remark','Weight'].forEach(function(key){ $tr.append($('<td>').text(displayRecordField(row,key))); });
+		$tr.append($('<td>').text(index ? comparisonDetails(row,group[0]) : '对比基准，保留'));
+		$body.append($tr);
+	});
+	$section.append($wrap.append($table.append($body)));
+	return $section;
+}
+async function scanRecordDuplicates(){
+	if(dedupeBusy) return;
+	dedupeBusy = true;
+	$('#dedupe-run,#dedupe-delete').prop('disabled',true);
+	$('#dedupe-panel').show();
+	$('#dedupe-message').text('正在读取该域名的全部解析记录…');
+	$('#dedupe-exact,#dedupe-related').empty();
+	try{
+		var rows = await RecordDedupe.fetchAll({$domainId});
+		var exact = RecordDedupe.group(rows);
+		var related = RecordDedupe.sameValuePairs(rows);
+		dedupeRows = new Map(rows.map(function(row){ return [RecordDedupe.id(row),row]; }));
+		$('#dedupe-message').text('检查 ' + rows.length + ' 条记录：发现 ' + exact.length + ' 组完全重复、' + related.length + ' 组同值关联。查重只展示候选项，不自动删除。');
+		exact.forEach(function(group){ $('#dedupe-exact').append(renderDedupeGroup(group,true)); });
+		if(related.length) $('#dedupe-related').append($('<h4>').text('仅记录值相同：请对比主机、类型、线路等差异'));
+		related.forEach(function(group){ $('#dedupe-related').append(renderDedupeGroup(group,false)); });
+		$('#dedupe-delete').toggle(exact.length > 0);
+	}catch(e){
+		dedupeRows.clear();
+		$('#dedupe-delete').hide();
+		$('#dedupe-message').text('查重失败：' + e.message + '。未执行删除。');
+	}finally{
+		dedupeBusy = false;
+		$('#dedupe-run,#dedupe-delete').prop('disabled',false);
+	}
+}
+function deleteSelectedDuplicates(){
+	if(dedupeBusy) return;
+	var ids = $('#dedupe-panel .dedupe-select:checked').map(function(){ return this.value; }).get();
+	if(!ids.length){ layer.msg('请先勾选要删除的完全重复记录'); return; }
+	layer.confirm('确定删除选中的 ' + ids.length + ' 条解析记录吗？删除前会重新核对完整记录，且每组至少保留一条。', {title:'二次确认删除',icon:0}, async function(dialog){
+		layer.close(dialog);
+		dedupeBusy = true;
+		$('#dedupe-run,#dedupe-delete').prop('disabled',true);
+		var deleted = 0;
+		try{
+			var fresh = await RecordDedupe.fetchAll({$domainId});
+			var current = new Map(fresh.map(function(row){ return [RecordDedupe.id(row),row]; }));
+			var counts = new Map();
+			fresh.forEach(function(row){ var key = RecordDedupe.exactKey(row); counts.set(key,(counts.get(key)||0)+1); });
+			ids.forEach(function(id){
+				var before = dedupeRows.get(id), now = current.get(id);
+				if(!before || !now || RecordDedupe.exactKey(before) !== RecordDedupe.exactKey(now)) throw new Error('记录 ' + id + ' 已变化，请重新查重');
+				if(now.Name === '@' && (now.Type === 'NS' || now.Type === 'SOA')) throw new Error('根域名 NS/SOA 不可在此删除');
+				var key = RecordDedupe.exactKey(now);
+				if((counts.get(key)||0) <= 1) throw new Error('记录 ' + id + ' 已无其他完全重复项');
+				counts.set(key,counts.get(key)-1);
+			});
+			for(var i=0;i<ids.length;i++){
+				// 有些服务商使用列表位置作 ID；每次删除后重新核对，防止位置变化误删。
+				var latest = await RecordDedupe.fetchAll({$domainId});
+				var row = latest.find(function(item){ return RecordDedupe.id(item) === ids[i]; });
+				var original = dedupeRows.get(ids[i]);
+				if(!row || !original || RecordDedupe.exactKey(row) !== RecordDedupe.exactKey(original))
+					throw new Error('记录 ' + ids[i] + ' 已变化，请重新查重');
+				if(latest.filter(function(item){ return RecordDedupe.exactKey(item) === RecordDedupe.exactKey(row); }).length <= 1)
+					throw new Error('记录 ' + ids[i] + ' 已无其他完全重复项');
+				var response = await $.ajax({type:'POST',url:'/record/delete/{$domainId}',dataType:'json',data:{recordid:ids[i],recordinfo:JSON.stringify(row)}});
+				if(!response || response.code !== 0) throw new Error('记录 ' + ids[i] + ' 删除失败：' + (response && response.msg || '未知错误'));
+				deleted++;
+			}
+			layer.alert('已删除 ' + deleted + ' 条勾选的重复记录。', {icon:1});
+		}catch(e){
+			var reason = e.responseJSON && e.responseJSON.msg ? e.responseJSON.msg : e.message || '网络请求失败';
+			layer.alert('已删除 ' + deleted + ' 条；后续操作已停止：' + reason, {icon:2});
+		}finally{
+			dedupeBusy = false;
+			$('#dedupe-run,#dedupe-delete').prop('disabled',false);
+			searchRefresh();
+			scanRecordDuplicates();
+		}
+	});
+}
 $(document).ready(function(){
 	updateToolbar();
 	const pageSizeKey = 'record_pagesize';
