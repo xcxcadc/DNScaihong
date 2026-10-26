@@ -367,7 +367,7 @@ async function preflightImport(){
 	}catch(e){
 		if(generation !== importGeneration) return;
 		renderImportSummary('无法读取完整目标记录：' + e.message + '。已停止导入，请重试。');
-		layer.alert('导入预检失败：' + e.message, {icon:2});
+		layer.alert('导入预检失败：' + $('<div>').text(e.message).html(), {icon:2});
 	}
 }
 
@@ -391,7 +391,7 @@ async function startImport(){
 		snapshotReady = false;
 		$('#import-file,#source-provider').prop('disabled', false);
 		renderImportSummary('导入已停止：重新检查目标记录失败：' + e.message);
-		layer.alert('导入已停止：' + e.message, {icon:2});
+		layer.alert('导入已停止：' + $('<div>').text(e.message).html(), {icon:2});
 		return;
 	}
 

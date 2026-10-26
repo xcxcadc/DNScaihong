@@ -377,7 +377,7 @@ function deleteSelectedDuplicates(){
 			layer.alert('已删除 ' + deleted + ' 条勾选的重复记录。', {icon:1});
 		}catch(e){
 			var reason = e.responseJSON && e.responseJSON.msg ? e.responseJSON.msg : e.message || '网络请求失败';
-			layer.alert('已删除 ' + deleted + ' 条；后续操作已停止：' + reason, {icon:2});
+			layer.alert('已删除 ' + deleted + ' 条；后续操作已停止：' + htmlEscape(reason), {icon:2});
 		}finally{
 			dedupeBusy = false;
 			$('#dedupe-run,#dedupe-delete').prop('disabled',false);
