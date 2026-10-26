@@ -283,6 +283,10 @@ function comparisonDetails(row, base){
 		return displayRecordField(row,key) !== displayRecordField(base,key);
 	}).map(function(key){ return labels[key] + ': ' + displayRecordField(base,key) + ' → ' + displayRecordField(row,key); }).join('；') || '各字段一致';
 }
+function recordFingerprint(row){
+	return JSON.stringify(['Name','Type','Line','Value','MX','TTL','Status','Remark','Weight']
+		.map(function(key){ return displayRecordField(row,key); }));
+}
 function renderDedupeGroup(group, deletable){
 	var $section = $('<div>').addClass('panel panel-default');
 	var $header = $('<div>').addClass('panel-heading').text(deletable ? '完全重复：' + group.length + ' 条，保留首条作为对比基准' : '同值关联：' + group.length + ' 条，仅供对比');
@@ -351,7 +355,7 @@ function deleteSelectedDuplicates(){
 			fresh.forEach(function(row){ var key = RecordDedupe.exactKey(row); counts.set(key,(counts.get(key)||0)+1); });
 			ids.forEach(function(id){
 				var before = dedupeRows.get(id), now = current.get(id);
-				if(!before || !now || RecordDedupe.exactKey(before) !== RecordDedupe.exactKey(now)) throw new Error('记录 ' + id + ' 已变化，请重新查重');
+				if(!before || !now || recordFingerprint(before) !== recordFingerprint(now)) throw new Error('记录 ' + id + ' 已变化，请重新查重');
 				if(now.Name === '@' && (now.Type === 'NS' || now.Type === 'SOA')) throw new Error('根域名 NS/SOA 不可在此删除');
 				var key = RecordDedupe.exactKey(now);
 				if((counts.get(key)||0) <= 1) throw new Error('记录 ' + id + ' 已无其他完全重复项');
@@ -362,7 +366,7 @@ function deleteSelectedDuplicates(){
 				var latest = await RecordDedupe.fetchAll({$domainId});
 				var row = latest.find(function(item){ return RecordDedupe.id(item) === ids[i]; });
 				var original = dedupeRows.get(ids[i]);
-				if(!row || !original || RecordDedupe.exactKey(row) !== RecordDedupe.exactKey(original))
+				if(!row || !original || recordFingerprint(row) !== recordFingerprint(original))
 					throw new Error('记录 ' + ids[i] + ' 已变化，请重新查重');
 				if(latest.filter(function(item){ return RecordDedupe.exactKey(item) === RecordDedupe.exactKey(row); }).length <= 1)
 					throw new Error('记录 ' + ids[i] + ' 已无其他完全重复项');
